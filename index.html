@@ -1,0 +1,854 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#0f6e56">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Roteirizador">
+<title>Roteirizador de cargas</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet-routing-machine/3.2.12/leaflet-routing-machine.css">
+<style>
+  :root{
+    --bg:#f4f5f3; --card:#ffffff; --border:#dcdcd6; --text:#222220;
+    --muted:#6b6b66; --accent:#0f6e56; --accent-bg:#e1f5ee; --danger:#a32d2d;
+  }
+  *{box-sizing:border-box;}
+  body{ font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif; background:var(--bg); color:var(--text); margin:0; padding:20px 16px 60px; }
+  h1{font-size:20px; font-weight:600; margin:0 0 4px;}
+  .subtitle{color:var(--muted); font-size:14px; margin:0 0 20px;}
+  /* computador: cidades e resumo à esquerda, mapa à direita fixo enquanto rola */
+  .layout{ display:grid; gap:0 16px; grid-template-columns:minmax(320px, 1fr) minmax(0, 2fr);
+           grid-template-areas:"cidades mapa" "resumo mapa"; align-items:start; }
+  .area-cidades{ grid-area:cidades; }
+  .area-resumo{ grid-area:resumo; }
+  .area-mapa{ grid-area:mapa; position:sticky; top:16px; }
+  .card{ background:var(--card); border:1px solid var(--border); border-radius:12px; padding:16px 18px; margin-bottom:14px; min-width:0; }
+  .card h2{font-size:14px; font-weight:600; margin:0 0 12px;}
+  #map{ height:calc(100vh - 120px); min-height:420px; border-radius:12px; border:1px solid var(--border); width:100%; }
+  .leaflet-routing-container{ display:none !important; }
+  .wp-list{display:flex; flex-direction:column; gap:8px;}
+  .wp-item{display:flex; gap:6px; align-items:center;}
+  .wp-item.arrastando{ opacity:0.5; }
+  .wp-item .handle{ color:var(--muted); font-size:16px; padding:6px 2px; cursor:grab; user-select:none; touch-action:none; }
+  .wp-item .campo{ flex:1; min-width:0; position:relative; }
+  .chip-uf{ padding:4px 8px; border:1px solid var(--border); border-radius:6px; font-size:12px; cursor:pointer; background:#fff; color:var(--muted); user-select:none; }
+  .chip-uf.ativo{ background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
+  .chip-uf.evitar{ background:var(--danger); border-color:var(--danger); color:#fff; font-weight:600; text-decoration:line-through; }
+  .wp-item input{ width:100%; padding:8px 10px; border:1px solid var(--border); border-radius:8px; font-size:13px; }
+  .sugestoes{ position:absolute; top:calc(100% + 4px); left:0; right:0; background:#fff; border:1px solid var(--border); border-radius:8px; max-height:220px; overflow-y:auto; z-index:1000; box-shadow:0 4px 14px rgba(0,0,0,0.08); display:none; }
+  .leg{ display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:4px 8px; font-size:13px; padding:5px 0; }
+  .leg .muted{ color:var(--muted); }
+  .chips{ display:flex; flex-wrap:wrap; gap:4px; }
+  .sugestoes div{ padding:8px 10px; font-size:13px; cursor:pointer; }
+  .sugestoes div:hover, .sugestoes div.ativa{ background:var(--accent-bg); color:var(--accent); }
+  .wp-item .tag{width:22px; height:22px; border-radius:50%; background:var(--accent-bg); color:var(--accent); font-size:11px; font-weight:700; display:flex; align-items:center; justify-content:center; flex-shrink:0;}
+  .wp-item button{ margin:0; padding:6px 8px; font-size:12px; background:transparent; border:1px solid var(--border); color:var(--muted); border-radius:6px; cursor:pointer;}
+  .wp-item button:hover{ color:var(--danger); border-color:var(--danger); }
+  button.primary{ background:var(--accent); color:#fff; border:none; border-radius:8px; padding:10px 16px; font-size:14px; font-weight:600; cursor:pointer; margin-top:8px; }
+  button.primary:hover{opacity:0.92;}
+  button.ghost{ background:#fff; color:var(--text); border:1px solid var(--border); border-radius:8px; padding:8px 12px; font-size:13px; cursor:pointer; margin-top:8px; }
+  .stat{display:flex; justify-content:space-between; padding:6px 0; font-size:14px; border-top:1px solid var(--border);}
+  .stat:first-child{border-top:none;}
+  .stat .k{color:var(--muted);}
+  .stat .v{font-weight:600;}
+  .states{background:var(--accent-bg); color:var(--accent); border-radius:8px; padding:8px 10px; font-size:13px; margin-top:6px;}
+  .loading{color:var(--muted); font-size:13px; display:none; margin-top:8px;}
+  .error{color:var(--danger); font-size:13px; display:none; margin-top:8px;}
+  .note{font-size:12px; color:var(--muted); margin-top:8px; line-height:1.5;}
+  .ajuda summary{ cursor:pointer; color:var(--muted); font-size:12px; margin-top:8px; }
+
+  /* celular: uma coluna, na ordem cidades → mapa → resumo */
+  @media (max-width: 799px){
+    body{ padding:12px max(12px, env(safe-area-inset-right)) 40px max(12px, env(safe-area-inset-left)); }
+    h1{ font-size:18px; margin-bottom:12px; }
+    .subtitle{ display:none; }
+    .layout{ grid-template-columns:minmax(0, 1fr); grid-template-areas:"cidades" "mapa" "resumo"; }
+    .area-mapa{ position:static; }
+    .card{ padding:14px; margin-bottom:12px; }
+    #map{ height:62vh; min-height:320px; }
+    .so-computador{ display:none; }
+
+    /* letra 16px nos campos: abaixo disso o iPhone dá zoom sozinho ao tocar */
+    .wp-item input, select, #ufTexto{ font-size:16px !important; padding:10px 12px !important; }
+    .sugestoes div{ font-size:15px; padding:12px; }
+
+    /* alvos de toque maiores */
+    .wp-item{ gap:8px; }
+    .wp-item .handle{ font-size:20px; padding:8px 4px; }
+    .wp-item .tag{ width:26px; height:26px; font-size:12px; }
+    .wp-item button.remover{ min-width:40px; min-height:40px; font-size:14px; }
+    .chips{ gap:6px; }
+    .chip-uf{ font-size:14px; padding:8px 0; width:calc((100% - 30px) / 6); text-align:center; }
+    button.primary{ padding:14px 16px; font-size:16px; }
+    button.ghost{ padding:11px 14px; font-size:14px; }
+    .leg button.ghost{ padding:8px 12px !important; font-size:13px !important; }
+    .stat{ font-size:15px; }
+    #pisoAntt{ font-size:18px !important; }
+  }
+</style>
+</head>
+<body>
+
+<h1>Roteirizador de cargas</h1>
+<p class="subtitle">Monte a rota com as cidades que o motorista informa. Depois de traçada, arraste a linha ou os marcadores no mapa pra ajustar o trajeto real. Gratuito, usa OpenStreetMap.</p>
+
+<div class="layout">
+    <div class="card area-cidades">
+      <h2>Cidades da rota (na ordem)</h2>
+      <div class="wp-list" id="wpList"></div>
+      <div class="note" id="statusCidades" style="margin-top:6px;">Carregando lista de municípios do IBGE...</div>
+      <button class="ghost" id="btnAdd">+ adicionar cidade</button>
+
+      <div style="margin-top:14px; border-top:1px solid var(--border); padding-top:12px;">
+        <div style="font-size:12px; color:var(--muted); margin-bottom:6px;">Estados (opcional)</div>
+        <div id="chipsUf" class="chips"></div>
+        <div class="note" style="margin-top:6px;">Toque uma vez pra <span style="color:var(--accent); font-weight:600;">passar</span> pelo estado, duas pra <span style="color:var(--danger); font-weight:600;">evitar</span>, três pra tirar a marcação.</div>
+      </div>
+
+      <button class="primary" id="btnRota" style="width:100%;">Traçar rota</button>
+      <div class="loading" id="loadingRota">Calculando rota...</div>
+      <div class="error" id="errorRota"></div>
+      <div id="avisoRota" style="display:none; margin-top:8px; font-size:12px; line-height:1.5; background:#faeeda; color:#854f0b; border-radius:8px; padding:8px 10px;"></div>
+      <details class="ajuda">
+        <summary>Como ajustar a rota no mapa</summary>
+        <div class="note">Arraste um marcador pra mudar a posição dele, ou arraste a linha verde pra criar um ponto novo no meio (no celular, arrastar marcador funciona; arrastar a linha é mais fácil no computador). Toque num marcador pra removê-lo. A rota recalcula sozinha.</div>
+      </details>
+    </div>
+
+    <div class="card area-mapa" id="cardMapa">
+      <h2>Mapa</h2>
+      <div id="map"></div>
+    </div>
+
+    <div class="card area-resumo" id="resumoCard" style="display:none;">
+      <h2>Resumo</h2>
+      <div class="stat"><span class="k">Distância total</span><span class="v" id="distTotal">-</span></div>
+      <div class="stat"><span class="k">Tempo (sem paradas)</span><span class="v" id="tempoTotal">-</span></div>
+      <div id="alternativas" style="display:none; margin-top:8px;">
+        <div style="font-size:12px; color:var(--muted); margin-bottom:6px;">Outras rotas encontradas:</div>
+        <div id="listaAlternativas"></div>
+      </div>
+
+      <label for="eixos" style="font-size:12px; color:var(--muted); display:block; margin:14px 0 4px;">Nº de eixos</label>
+      <select id="eixos" style="width:100%; padding:8px 10px; border:1px solid var(--border); border-radius:8px; font-size:13px;">
+        <option value="2">2 — Toco</option>
+        <option value="3">3 — Truck</option>
+        <option value="4">4 — Bitruck / carreta 4 eixos</option>
+        <option value="5" selected>5 — Cavalo simples + carreta LS</option>
+        <option value="6">6 — Cavalo trucado + carreta LS</option>
+        <option value="7">7 — Bitrem</option>
+        <option value="9">9 — Rodotrem</option>
+      </select>
+      <div class="stat" style="border-top:1px solid var(--border); margin-top:10px;">
+        <span class="k">Piso mínimo ANTT</span>
+        <span class="v" id="pisoAntt" style="color:var(--accent); font-size:16px;">-</span>
+      </div>
+      <div class="note" style="margin-top:2px;">Portaria SUROC nº 22/2026, vigente desde 30/09/2026 (diesel S10 a R$ 7,33). Carga geral, composição veicular, sem alto desempenho e sem retorno vazio.</div>
+      <details class="ajuda">
+        <summary>Sobre a tabela da ANTT</summary>
+        <div class="note">A ANTT revisa a tabela em janeiro e julho, e fora de época quando o diesel varia 5% ou mais. Pra qualquer outro cenário (outro tipo de carga, alto desempenho, retorno vazio), use a calculadora oficial: <a href="https://calculadorafrete.antt.gov.br" target="_blank" rel="noopener">calculadorafrete.antt.gov.br</a>.</div>
+      </details>
+
+      <button class="ghost" id="btnEstados" style="width:100%; margin-top:14px;">Identificar estados percorridos</button>
+      <div class="loading" id="loadingEstados">Consultando estados...</div>
+      <div class="states" id="estadosLista" style="display:none;"></div>
+      <div id="ufCampo" style="display:none; margin-top:8px;">
+        <label style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Pra colar no MDF-e</label>
+        <div style="display:flex; gap:6px;">
+          <input id="ufTexto" readonly style="flex:1; padding:8px 10px; border:1px solid var(--border); border-radius:8px; font-size:13px; font-family:ui-monospace,Menlo,monospace;">
+          <button class="ghost" id="btnCopiarUf" style="margin:0; white-space:nowrap;">Copiar</button>
+        </div>
+      </div>
+      <div class="note so-computador">A distância e o piso atualizam sozinhos quando você ajusta a rota. Os estados recalculam quando você clica no botão.</div>
+    </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet-routing-machine/3.2.12/leaflet-routing-machine.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+let wpCount = 0;
+const wpList = $('wpList');
+
+function addWaypoint(value=''){
+  wpCount++;
+  const row = document.createElement('div');
+  row.className = 'wp-item';
+  row.innerHTML = `<div class="handle" title="arrastar pra reordenar" aria-label="arrastar pra reordenar">⠿</div>
+    <div class="tag">${wpCount}</div>
+    <div class="campo">
+      <input type="text" placeholder="Digite a cidade..." value="${value}" autocomplete="off" autocapitalize="words" enterkeyhint="next">
+      <div class="sugestoes"></div>
+    </div>
+    <button class="remover" title="remover" aria-label="remover cidade">✕</button>`;
+  row.querySelector('button.remover').addEventListener('click', () => {
+    row.remove();
+    renumerar();
+  });
+  ligarAutocomplete(row.querySelector('input'), row.querySelector('.sugestoes'));
+  ligarArraste(row);
+  wpList.appendChild(row);
+}
+
+// arrastar pra reordenar, com pointer events: funciona com mouse e com o dedo
+function ligarArraste(row){
+  const handle = row.querySelector('.handle');
+  let arrastando = false;
+  handle.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    arrastando = true;
+    try{ handle.setPointerCapture(e.pointerId); }catch(_){}
+    row.classList.add('arrastando');
+  });
+  handle.addEventListener('pointermove', (e) => {
+    if(!arrastando) return;
+    const outras = [...wpList.children].filter(r => r !== row);
+    const depoisDe = outras.find(r => {
+      const rect = r.getBoundingClientRect();
+      return e.clientY < rect.top + rect.height / 2;
+    });
+    if(depoisDe){ if(row.nextSibling !== depoisDe) wpList.insertBefore(row, depoisDe); }
+    else if(wpList.lastChild !== row) wpList.appendChild(row);
+  });
+  const soltar = () => {
+    if(!arrastando) return;
+    arrastando = false;
+    row.classList.remove('arrastando');
+    renumerar();
+  };
+  handle.addEventListener('pointerup', soltar);
+  handle.addEventListener('pointercancel', soltar);
+}
+function renumerar(){
+  [...wpList.children].forEach((row, i) => { row.querySelector('.tag').textContent = i + 1; });
+  wpCount = wpList.children.length;
+}
+$('btnAdd').addEventListener('click', () => addWaypoint());
+
+// chips de UF: 1 clique = passar por, 2 cliques = evitar, 3 = sem marcação
+const TODAS_UFS = ['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'];
+const ufsSelecionadas = new Set(); // forçar passagem
+const ufsEvitadas = new Set();     // evitar
+(function montarChipsUf(){
+  const cont = $('chipsUf');
+  TODAS_UFS.forEach(uf => {
+    const chip = document.createElement('div');
+    chip.className = 'chip-uf';
+    chip.textContent = uf;
+    chip.title = 'clique: passar por · 2 cliques: evitar · 3: limpar';
+    chip.addEventListener('click', () => {
+      if(ufsSelecionadas.has(uf)){
+        ufsSelecionadas.delete(uf); ufsEvitadas.add(uf);
+        chip.classList.remove('ativo'); chip.classList.add('evitar');
+      } else if(ufsEvitadas.has(uf)){
+        ufsEvitadas.delete(uf);
+        chip.classList.remove('evitar');
+      } else {
+        ufsSelecionadas.add(uf);
+        chip.classList.add('ativo');
+      }
+    });
+    cont.appendChild(chip);
+  });
+})();
+
+// distância aproximada em km entre dois pontos (suficiente pra comparar proximidade)
+function distKm(lat1, lon1, lat2, lon2){
+  const x = (lon2 - lon1) * Math.cos((lat1 + lat2) * Math.PI / 360) * 111.32;
+  const y = (lat2 - lat1) * 111.32;
+  return Math.sqrt(x*x + y*y);
+}
+
+// dada uma rota direta, escolhe pra cada UF pedida a cidade mais próxima do trajeto
+function escolherCidadesDosEstados(coordsRota, ufsPedidas){
+  // amostra a rota pra não comparar contra milhares de pontos
+  const amostra = [];
+  const passo = Math.max(1, Math.floor(coordsRota.length / 250));
+  for(let i = 0; i < coordsRota.length; i += passo) amostra.push({ pt: coordsRota[i], ordem: i });
+
+  const escolhidas = [];
+  ufsPedidas.forEach(uf => {
+    // se a rota direta já cruza esse estado, não precisa forçar nada
+    const jaCruza = amostra.some(a => {
+      const e = reverseState(a.pt.lat !== undefined ? a.pt.lat : a.pt[1], a.pt.lng !== undefined ? a.pt.lng : a.pt[0]);
+      return e && e.uf === uf;
+    });
+    if(jaCruza) return;
+
+    const cidadesDaUf = cidadesBR.filter(c => c.uf === uf);
+    if(!cidadesDaUf.length) return;
+
+    let melhor = null;
+    cidadesDaUf.forEach(c => {
+      amostra.forEach(a => {
+        const alat = a.pt.lat !== undefined ? a.pt.lat : a.pt[1];
+        const alon = a.pt.lng !== undefined ? a.pt.lng : a.pt[0];
+        const d = distKm(c.lat, c.lon, alat, alon);
+        if(!melhor || d < melhor.dist) melhor = { cidade: c, dist: d, ordem: a.ordem };
+      });
+    });
+    if(melhor) escolhidas.push(melhor);
+  });
+
+  // ordena pela posição ao longo da rota, pra inserir os pontos na sequência certa
+  escolhidas.sort((a, b) => a.ordem - b.ordem);
+  return escolhidas;
+}
+
+// ---- evitar estados ----
+
+// pede uma rota crua ao OSRM e devolve [{coords, km}]
+async function rotaOSRM(pontos, comAlternativas){
+  const coordsStr = pontos.map(p => `${p.lon},${p.lat}`).join(';');
+  const url = `https://router.project-osrm.org/route/v1/driving/${coordsStr}`
+    + `?overview=full&geometries=geojson${comAlternativas ? '&alternatives=true' : ''}`;
+  const res = await fetch(url);
+  const data = await res.json();
+  if(!data.routes || !data.routes.length) return null;
+  return data.routes.map(r => ({
+    coords: r.geometry.coordinates.map(c => ({ lat: c[1], lng: c[0] })),
+    km: r.distance / 1000
+  }));
+}
+
+// quais UFs uma rota cruza (amostrado, pra não pesar)
+function ufsCruzadas(coords){
+  const set = new Set();
+  if(!coords || !coords.length) return set;
+  const passo = Math.max(1, Math.floor(coords.length / 150));
+  for(let i = 0; i < coords.length; i += passo){
+    const e = reverseState(coords[i].lat, coords[i].lng);
+    if(e && e.uf) set.add(e.uf);
+  }
+  const ult = reverseState(coords[coords.length - 1].lat, coords[coords.length - 1].lng);
+  if(ult && ult.uf) set.add(ult.uf);
+  return set;
+}
+
+function violaEvitadas(coords, ufsEvitar){
+  const cruza = ufsCruzadas(coords);
+  return ufsEvitar.filter(u => cruza.has(u));
+}
+
+// ponto no meio do trecho que cai dentro de um estado proibido
+function pontoNoEstadoProibido(coords, ufsEvitar){
+  const dentro = [];
+  if(!coords || !coords.length) return null;
+  const passo = Math.max(1, Math.floor(coords.length / 150));
+  for(let i = 0; i < coords.length; i += passo){
+    const e = reverseState(coords[i].lat, coords[i].lng);
+    if(e && ufsEvitar.includes(e.uf)) dentro.push(coords[i]);
+  }
+  return dentro.length ? dentro[Math.floor(dentro.length / 2)] : null;
+}
+
+// cidades candidatas pra desviar: em estados permitidos, espalhadas ao redor do ponto proibido
+function candidatosDesvio(M, ufsEvitar, maxCand){
+  const perto = cidadesBR
+    .filter(c => c.uf && !ufsEvitar.includes(c.uf))
+    .map(c => ({ c, d: distKm(c.lat, c.lon, M.lat, M.lng) }))
+    .filter(x => x.d > 40 && x.d < 800)
+    .sort((a, b) => a.d - b.d);
+
+  // mantém espalhamento geográfico (no mínimo 100 km entre candidatos)
+  const cand = [];
+  for(const x of perto){
+    if(cand.length >= maxCand) break;
+    if(cand.every(y => distKm(x.c.lat, x.c.lon, y.lat, y.lon) > 100)) cand.push(x.c);
+  }
+  return cand;
+}
+
+// insere uma cidade na sequência, na posição certa ao longo da rota base
+function inserirNaOrdem(pontos, cidade, coordsBase){
+  const ordemDe = (lat, lon) => {
+    let melhor = 0, menor = Infinity;
+    coordsBase.forEach((c, i) => {
+      const d = distKm(lat, lon, c.lat, c.lng);
+      if(d < menor){ menor = d; melhor = i; }
+    });
+    return melhor;
+  };
+  const origem = pontos[0];
+  const destino = pontos[pontos.length - 1];
+  const meio = pontos.slice(1, -1).map(p => ({ ponto: p, ordem: ordemDe(p.lat, p.lon) }));
+  const novo = { ponto: { lat: cidade.lat, lon: cidade.lon, query: cidade.label }, ordem: ordemDe(cidade.lat, cidade.lon) };
+  const inter = [...meio, novo].sort((a, b) => a.ordem - b.ordem).map(x => x.ponto);
+  return [origem, ...inter, destino];
+}
+
+// tenta achar uma sequência de pontos cuja rota não entre nos estados evitados
+async function desviarDeEstados(pontos, ufsEvitar, log){
+  const rotas = await rotaOSRM(pontos, true);
+  if(!rotas) return { pontos, aviso: null };
+
+  const base = rotas[0].coords;
+  if(!violaEvitadas(base, ufsEvitar).length) return { pontos, aviso: null };
+
+  // 1) alguma alternativa que o próprio OSRM já devolveu resolve?
+  for(let i = 1; i < rotas.length; i++){
+    if(!violaEvitadas(rotas[i].coords, ufsEvitar).length){
+      const c = rotas[i].coords;
+      const via = [1,2,3,4].map(k => {
+        const pt = c[Math.floor((c.length - 1) * k / 5)];
+        return { lat: pt.lat, lon: pt.lng, query: 'desvio' };
+      });
+      return { pontos: [pontos[0], ...via, pontos[pontos.length - 1]], aviso: null };
+    }
+  }
+
+  // 2) procura uma cidade de desvio em estado permitido
+  const M = pontoNoEstadoProibido(base, ufsEvitar);
+  if(!M) return { pontos, aviso: null };
+  const candidatos = candidatosDesvio(M, ufsEvitar, 8);
+
+  let melhor = null;
+  for(let i = 0; i < candidatos.length; i++){
+    log(`Procurando desvio... (${i + 1}/${candidatos.length})`);
+    const tentativa = inserirNaOrdem(pontos, candidatos[i], base);
+    try{
+      const r = await rotaOSRM(tentativa, false);
+      if(r && !violaEvitadas(r[0].coords, ufsEvitar).length){
+        if(!melhor || r[0].km < melhor.km) melhor = { km: r[0].km, pontos: tentativa, cidade: candidatos[i] };
+      }
+    }catch(e){}
+    await sleep(150);
+  }
+
+  if(melhor) return { pontos: melhor.pontos, aviso: null, desvioPor: melhor.cidade.label };
+  return {
+    pontos,
+    aviso: `Não achei um desvio que evite ${ufsEvitar.join(', ')} sem sair muito do caminho. A rota traçada ainda passa por lá — ajuste arrastando a linha no mapa.`
+  };
+}
+
+function normalizar(txt){
+  return txt.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+}
+
+let cidadesBR = []; // [{label: 'Brasília, DF', busca: 'brasilia, df'}]
+
+function ligarAutocomplete(input, caixa){
+  let ativo = -1;
+  input.addEventListener('input', () => {
+    ativo = -1;
+    const termo = normalizar(input.value.trim());
+    if(termo.length < 2 || !cidadesBR.length){ caixa.style.display = 'none'; return; }
+    const resultados = cidadesBR.filter(c => c.busca.includes(termo)).slice(0, 8);
+    if(!resultados.length){ caixa.style.display = 'none'; return; }
+    caixa.innerHTML = resultados.map(c => `<div>${c.label}</div>`).join('');
+    caixa.style.display = 'block';
+    [...caixa.children].forEach((el, i) => {
+      el.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        input.value = resultados[i].label;
+        caixa.style.display = 'none';
+      });
+    });
+  });
+  input.addEventListener('keydown', (e) => {
+    const itens = [...caixa.children];
+    if(caixa.style.display !== 'block' || !itens.length) return;
+    if(e.key === 'ArrowDown'){ e.preventDefault(); ativo = Math.min(ativo + 1, itens.length - 1); }
+    else if(e.key === 'ArrowUp'){ e.preventDefault(); ativo = Math.max(ativo - 1, 0); }
+    else if(e.key === 'Enter' && ativo >= 0){ e.preventDefault(); itens[ativo].dispatchEvent(new Event('mousedown')); return; }
+    else return;
+    itens.forEach((el, i) => el.classList.toggle('ativa', i === ativo));
+  });
+  input.addEventListener('blur', () => setTimeout(() => caixa.style.display = 'none', 150));
+}
+
+addWaypoint();
+addWaypoint();
+
+// carrega municípios do Brasil (nome, UF, lat/lon já prontos — dataset público, sem chave)
+// assim localizar cidade fica instantâneo e local, sem depender do Nominatim
+const UF_POR_CODIGO = {
+  11:'RO',12:'AC',13:'AM',14:'RR',15:'PA',16:'AP',17:'TO',21:'MA',22:'PI',23:'CE',24:'RN',25:'PB',
+  26:'PE',27:'AL',28:'SE',29:'BA',31:'MG',32:'ES',33:'RJ',35:'SP',41:'PR',42:'SC',43:'RS',50:'MS',
+  51:'MT',52:'GO',53:'DF'
+};
+fetch('https://raw.githubusercontent.com/kelvins/municipios-brasileiros/main/json/municipios.json')
+  .then(r => r.json())
+  .then(lista => {
+    cidadesBR = lista.map(m => {
+      const uf = UF_POR_CODIGO[m.codigo_uf] || '';
+      const label = uf ? `${m.nome}, ${uf}` : m.nome;
+      return { label, busca: normalizar(label), lat: m.latitude, lon: m.longitude, uf };
+    });
+    $('statusCidades').textContent = `${cidadesBR.length} municípios carregados — comece a digitar pra ver as sugestões (sem precisar de acento).`;
+  })
+  .catch(() => {
+    $('statusCidades').textContent = 'Não deu pra carregar a lista de municípios agora — recarregue a página em alguns instantes.';
+  });
+
+// mapa
+const map = L.map('map').setView([-15.78, -47.93], 4);
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+  attribution: 'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ',
+  maxZoom: 16
+}).addTo(map);
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}', {
+  maxZoom: 16
+}).addTo(map);
+
+// divisas dos estados do Brasil como camada própria, nítida em qualquer zoom
+// (guardamos o geojson também pra descobrir localmente em qual estado cada ponto da rota cai, sem depender de serviço externo)
+let estadosGeoJSON = null;
+fetch('https://raw.githubusercontent.com/codeforgermany/click_that_hood/main/public/data/brazil-states.geojson')
+  .then(r => r.json())
+  .then(geo => {
+    estadosGeoJSON = geo;
+    L.geoJSON(geo, {
+      style: { color: '#8a8a84', weight: 1.3, fill: false, opacity: 0.85 }
+    }).addTo(map);
+  })
+  .catch(() => {});
+
+function geocode(q){
+  if(!cidadesBR.length) throw new Error('A lista de municípios ainda não carregou — espera um instante e tenta de novo.');
+  const termo = normalizar(q.trim());
+  // tenta achar correspondência exata (o usuário escolheu da lista de sugestões)
+  let match = cidadesBR.find(c => c.busca === termo);
+  // senão, pega a melhor correspondência parcial
+  if(!match) match = cidadesBR.find(c => c.busca.startsWith(termo));
+  if(!match) match = cidadesBR.find(c => c.busca.includes(termo));
+  if(!match) throw new Error('Cidade não encontrada: "' + q + '". Escolhe uma das sugestões da lista.');
+  return { lat: match.lat, lon: match.lon, query: match.label };
+}
+const UF_POR_NOME = {
+  'acre':'AC','alagoas':'AL','amapá':'AP','amapa':'AP','amazonas':'AM','bahia':'BA','ceará':'CE','ceara':'CE',
+  'distrito federal':'DF','espírito santo':'ES','espirito santo':'ES','goiás':'GO','goias':'GO','maranhão':'MA','maranhao':'MA',
+  'mato grosso':'MT','mato grosso do sul':'MS','minas gerais':'MG','pará':'PA','para':'PA','paraíba':'PB','paraiba':'PB',
+  'paraná':'PR','parana':'PR','pernambuco':'PE','piauí':'PI','piaui':'PI','rio de janeiro':'RJ',
+  'rio grande do norte':'RN','rio grande do sul':'RS','rondônia':'RO','rondonia':'RO','roraima':'RR',
+  'santa catarina':'SC','são paulo':'SP','sao paulo':'SP','sergipe':'SE','tocantins':'TO'
+};
+
+// ponto-dentro-de-polígono, feito local (algoritmo ray casting), sem chamar serviço nenhum
+function pontoNoAnel(x, y, anel){
+  let dentro = false;
+  for(let i = 0, j = anel.length - 1; i < anel.length; j = i++){
+    const xi = anel[i][0], yi = anel[i][1], xj = anel[j][0], yj = anel[j][1];
+    const intersecta = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+    if(intersecta) dentro = !dentro;
+  }
+  return dentro;
+}
+function pontoNoPoligono(x, y, aneis){
+  if(!pontoNoAnel(x, y, aneis[0])) return false; // anel externo
+  for(let i = 1; i < aneis.length; i++){ if(pontoNoAnel(x, y, aneis[i])) return false; } // buracos
+  return true;
+}
+function reverseState(lat, lon){
+  if(!estadosGeoJSON) return null;
+  for(const feature of estadosGeoJSON.features){
+    const geom = feature.geometry;
+    let achou = false;
+    if(geom.type === 'Polygon'){
+      achou = pontoNoPoligono(lon, lat, geom.coordinates);
+    } else if(geom.type === 'MultiPolygon'){
+      achou = geom.coordinates.some(poly => pontoNoPoligono(lon, lat, poly));
+    }
+    if(achou){
+      const nome = feature.properties.name || feature.properties.NAME || feature.properties.nome;
+      const uf = UF_POR_NOME[normalizar(nome)] || null;
+      return { nome, uf };
+    }
+  }
+  return null; // ponto fora do Brasil (ou fora dos contornos carregados)
+}
+function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
+
+let routingControl = null;
+let ultimaRotaCoords = null;
+let ultimaDistKm = null;
+let baseAlternativas = null;   // lista original de opções (guardada uma vez, ao traçar)
+let waypointsBase = null;      // origem/destino "puros", sem os pontos via inseridos ao trocar de opção
+let alternativaAtivaIdx = 0;
+let trocandoAlternativa = false;
+
+// Tabela A - Carga Geral - Composição Veicular
+// Portaria SUROC nº 22, de 28/09/2026 (DOU extra 29/09), vigente desde 30/09/2026
+// Reajuste por diesel S10 a R$ 7,33/L (antes R$ 6,97). Só o CCD mudou; o CC segue igual.
+const TABELA_A_CARGA_GERAL = {
+  2: { ccd: 4.0738, cc: 451.84 },
+  3: { ccd: 5.2177, cc: 541.86 },
+  4: { ccd: 5.9180, cc: 588.86 },
+  5: { ccd: 6.8284, cc: 657.56 },
+  6: { ccd: 7.5347, cc: 671.93 },
+  7: { ccd: 8.2727, cc: 831.66 },
+  9: { ccd: 9.4114, cc: 903.32 }
+};
+
+function calcularPisoAntt(){
+  if(ultimaDistKm == null) return;
+  const eixos = parseInt($('eixos').value, 10);
+  const coef = TABELA_A_CARGA_GERAL[eixos];
+  if(!coef){ $('pisoAntt').textContent = '—'; return; }
+  const piso = ultimaDistKm * coef.ccd + coef.cc;
+  $('pisoAntt').textContent = piso.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+$('eixos').addEventListener('change', calcularPisoAntt);
+
+function atualizarResumo(route, todasRotas){
+  // arredonda pra cima, em km inteiro: é o número que aparece na tela e que você
+  // digita na calculadora oficial (que não aceita vírgula), então o piso tem que
+  // ser calculado em cima dele. Pra cima também evita ficar abaixo do piso legal.
+  const kmTotal = Math.ceil(route.summary.totalDistance / 1000);
+  const horas = route.summary.totalTime / 3600;
+  $('distTotal').textContent = kmTotal.toLocaleString('pt-BR') + ' km';
+  const h = Math.floor(horas);
+  const m = Math.round((horas - h) * 60);
+  $('tempoTotal').textContent = `${h}h ${m}min`;
+  ultimaRotaCoords = route.coordinates; // [{lat, lng}, ...]
+  ultimaDistKm = kmTotal;
+  $('estadosLista').style.display = 'none';
+  $('ufCampo').style.display = 'none';
+  $('resumoCard').style.display = 'block';
+  calcularPisoAntt();
+
+  const altDiv = $('alternativas');
+  const lista = $('listaAlternativas');
+  const soDoisPontos = waypointsBase && waypointsBase.length === 2;
+
+  if(!trocandoAlternativa){
+    baseAlternativas = (todasRotas && todasRotas.length > 1 && soDoisPontos) ? todasRotas : null;
+    alternativaAtivaIdx = 0;
+  }
+  trocandoAlternativa = false;
+
+  if(baseAlternativas && soDoisPontos){
+    lista.innerHTML = baseAlternativas.map((r, i) => {
+      const km = Math.ceil(r.summary.totalDistance / 1000).toLocaleString('pt-BR');
+      const th = Math.floor(r.summary.totalTime / 3600);
+      const tm = Math.round((r.summary.totalTime % 3600) / 60);
+      const emUso = i === alternativaAtivaIdx;
+      const botao = emUso
+        ? '<span style="font-size:12px; color:var(--accent); font-weight:600;">em uso</span>'
+        : `<button class="ghost" style="margin:0; padding:4px 10px; font-size:12px;" data-idx="${i}">usar esta</button>`;
+      return `<div class="leg" style="cursor:default;"><span>Opção ${i+1}</span><span class="muted" style="display:flex; align-items:center; gap:8px;">${km} km · ${th}h${tm}min ${botao}</span></div>`;
+    }).join('');
+    altDiv.style.display = 'block';
+    lista.querySelectorAll('button[data-idx]').forEach(btn => {
+      btn.addEventListener('click', () => usarRotaAlternativa(parseInt(btn.dataset.idx, 10)));
+    });
+  } else if(todasRotas && todasRotas.length > 1 && !soDoisPontos){
+    lista.innerHTML = '<div class="note" style="margin:0;">Rota com paradas no meio: pra ajustar, arraste a linha no mapa em vez de trocar de opção aqui.</div>';
+    altDiv.style.display = 'block';
+  } else {
+    altDiv.style.display = 'none';
+  }
+}
+
+function usarRotaAlternativa(idx){
+  if(!baseAlternativas || !waypointsBase) return;
+  alternativaAtivaIdx = idx;
+  trocandoAlternativa = true;
+  const routeAlt = baseAlternativas[idx];
+  const coords = routeAlt.coordinates;
+  const qtd = 4;
+  const via = [];
+  for(let i = 1; i <= qtd; i++){
+    const idxPt = Math.floor((coords.length - 1) * i / (qtd + 1));
+    via.push(coords[idxPt]);
+  }
+  // opção 0 é sempre a rota "padrão" original — nesse caso não precisa de pontos via nenhum
+  const novosWaypoints = idx === 0 ? waypointsBase : [waypointsBase[0], ...via, waypointsBase[1]];
+  routingControl.setWaypoints(novosWaypoints);
+}
+
+$('btnRota').addEventListener('click', async () => {
+  const inputs = [...wpList.querySelectorAll('input')].map(i => i.value.trim());
+  $('errorRota').style.display = 'none';
+  if(inputs.some(v => !v) || inputs.length < 2){
+    $('errorRota').textContent = 'Preencha ao menos duas cidades (origem e destino).';
+    $('errorRota').style.display = 'block';
+    return;
+  }
+  $('loadingRota').textContent = 'Calculando rota...';
+  $('loadingRota').style.display = 'block';
+  try{
+    let pontos = inputs.map(q => geocode(q));
+
+    // se o usuário marcou estados, calcula a rota direta primeiro e insere
+    // a cidade mais próxima do trajeto dentro de cada estado pedido
+    if(ufsSelecionadas.size){
+      $('loadingRota').textContent = 'Escolhendo por onde passar nos estados marcados...';
+      const coordsStr = pontos.map(p => `${p.lon},${p.lat}`).join(';');
+      const url = `https://router.project-osrm.org/route/v1/driving/${coordsStr}?overview=full&geometries=geojson`;
+      const res = await fetch(url);
+      const data = await res.json();
+      if(data.routes && data.routes.length){
+        const coords = data.routes[0].geometry.coordinates.map(c => ({ lat: c[1], lng: c[0] }));
+        const extras = escolherCidadesDosEstados(coords, [...ufsSelecionadas]);
+        if(extras.length){
+          // posição aproximada de cada ponto ao longo da rota, pra montar a sequência certa
+          const ordemDe = (lat, lon) => {
+            let melhor = 0, menor = Infinity;
+            coords.forEach((c, i) => {
+              const d = distKm(lat, lon, c.lat, c.lng);
+              if(d < menor){ menor = d; melhor = i; }
+            });
+            return melhor;
+          };
+          const origem = pontos[0];
+          const destino = pontos[pontos.length - 1];
+          const meio = pontos.slice(1, -1).map(p => ({ ponto: p, ordem: ordemDe(p.lat, p.lon) }));
+          const novos = extras.map(e => ({ ponto: { lat: e.cidade.lat, lon: e.cidade.lon, query: e.cidade.label }, ordem: e.ordem }));
+          const intermediarios = [...meio, ...novos].sort((a, b) => a.ordem - b.ordem).map(x => x.ponto);
+          pontos = [origem, ...intermediarios, destino];
+
+          // reescreve a lista de cidades na tela, já na ordem final
+          wpList.innerHTML = '';
+          wpCount = 0;
+          pontos.forEach(p => addWaypoint(p.query));
+        }
+      }
+      $('loadingRota').textContent = 'Calculando rota...';
+    }
+
+    // se o usuário marcou estados pra evitar, tenta desviar deles
+    $('avisoRota').style.display = 'none';
+    if(ufsEvitadas.size){
+      $('loadingRota').textContent = 'Verificando estados a evitar...';
+      const r = await desviarDeEstados(pontos, [...ufsEvitadas], txt => { $('loadingRota').textContent = txt; });
+      pontos = r.pontos;
+      if(r.aviso){
+        $('avisoRota').textContent = r.aviso;
+        $('avisoRota').style.display = 'block';
+      } else if(r.desvioPor){
+        $('avisoRota').textContent = `Pra evitar ${[...ufsEvitadas].join(', ')}, desviei passando por ${r.desvioPor}.`;
+        $('avisoRota').style.display = 'block';
+        // cidade de desvio é um município de verdade, então entra na lista
+        wpList.innerHTML = '';
+        wpCount = 0;
+        pontos.forEach(p => addWaypoint(p.query));
+      }
+      $('loadingRota').textContent = 'Calculando rota...';
+    }
+
+    waypointsBase = pontos.length === 2 ? pontos.map(p => L.latLng(p.lat, p.lon)) : null;
+    baseAlternativas = null;
+    alternativaAtivaIdx = 0;
+    trocandoAlternativa = false;
+
+    if(routingControl){ map.removeControl(routingControl); routingControl = null; }
+
+    routingControl = L.Routing.control({
+      waypoints: pontos.map(p => L.latLng(p.lat, p.lon)),
+      router: L.Routing.osrmv1({
+        serviceUrl: 'https://router.project-osrm.org/route/v1',
+        urlParameters: { alternatives: true }
+      }),
+      routeWhileDragging: true,
+      addWaypoints: true,
+      draggableWaypoints: true,
+      fitSelectedRoutes: true,
+      show: false,
+      showAlternatives: true,
+      lineOptions: { styles: [{ color: '#0f6e56', weight: 5, opacity: 0.9 }] },
+      altLineOptions: { styles: [{ color: '#8a8a84', weight: 4, opacity: 0.6, dashArray: '6,8' }] },
+      createMarker: function(i, wp){
+        const marker = L.marker(wp.latLng, { draggable: true });
+        const el = document.createElement('div');
+        el.style.fontSize = '13px';
+        el.innerHTML = `Ponto ${i+1}<br><button style="margin-top:6px;padding:5px 10px;font-size:12px;cursor:pointer;border:1px solid #a32d2d;color:#a32d2d;background:#fff;border-radius:6px;">Remover este ponto</button>`;
+        el.querySelector('button').addEventListener('click', () => {
+          const wps = routingControl.getWaypoints();
+          if(wps.length <= 2){
+            alert('Precisa de pelo menos 2 pontos (origem e destino).');
+            return;
+          }
+          const idx = wps.findIndex(w => w.latLng && w.latLng.equals(marker.getLatLng()));
+          if(idx !== -1) routingControl.spliceWaypoints(idx, 1);
+        });
+        marker.bindPopup(el);
+        return marker;
+      }
+    }).addTo(map);
+
+    routingControl.on('routesfound', (e) => atualizarResumo(e.routes[0], e.routes));
+    // no celular, depois de traçar, rola até o mapa (só na primeira rota, não a cada arrasto)
+    routingControl.once('routesfound', () => {
+      if(window.matchMedia('(max-width: 799px)').matches){
+        $('cardMapa').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    });
+    routingControl.on('routingerror', (e) => {
+      const msg = (e && e.error && e.error.message) ? e.error.message : 'Não foi possível calcular a rota entre esses pontos.';
+      $('errorRota').textContent = msg;
+      $('errorRota').style.display = 'block';
+      console.error('routing error', e);
+    });
+  }catch(e){
+    $('errorRota').textContent = e.message || 'Erro ao calcular a rota.';
+    $('errorRota').style.display = 'block';
+  }finally{
+    $('loadingRota').style.display = 'none';
+  }
+});
+
+$('btnEstados').addEventListener('click', () => {
+  if(!ultimaRotaCoords || !ultimaRotaCoords.length) return;
+  if(!estadosGeoJSON){
+    alert('Os contornos dos estados ainda não carregaram — espera um instante e tenta de novo.');
+    return;
+  }
+  $('estadosLista').style.display = 'none';
+  $('ufCampo').style.display = 'none';
+  try{
+    const vistos = []; // [{nome, uf}], na ordem, repete se o motorista voltar pro mesmo estado depois (ex: GO,DF,GO)
+    const igualAoUltimo = (v) => {
+      const ultimo = vistos[vistos.length - 1];
+      return ultimo && (ultimo.uf || ultimo.nome) === (v.uf || v.nome);
+    };
+    const total = ultimaRotaCoords.length;
+    const numAmostras = Math.min(80, total); // agora é local, dá pra amostrar bem mais sem custo
+    const passo = Math.max(1, Math.floor(total / numAmostras));
+    for(let i = 0; i < total; i += passo){
+      const pt = ultimaRotaCoords[i];
+      const v = reverseState(pt.lat, pt.lng);
+      if(v && !igualAoUltimo(v)) vistos.push(v);
+    }
+    const last = ultimaRotaCoords[total - 1];
+    const v = reverseState(last.lat, last.lng);
+    if(v && !igualAoUltimo(v)) vistos.push(v);
+
+    if(vistos.length){
+      $('estadosLista').textContent = 'Estados/países percorridos: ' + vistos.map(v => v.nome).join(' → ');
+      $('estadosLista').style.display = 'block';
+
+      const ufs = vistos.filter(v => v.uf).map(v => v.uf);
+      if(ufs.length){
+        $('ufTexto').value = ufs.join(',');
+        $('ufCampo').style.display = 'block';
+      }
+    } else {
+      $('estadosLista').textContent = 'Não foi possível identificar os estados da rota.';
+      $('estadosLista').style.display = 'block';
+    }
+  }finally{
+    $('loadingEstados').style.display = 'none';
+  }
+});
+
+$('btnCopiarUf').addEventListener('click', async () => {
+  const texto = $('ufTexto').value;
+  try{
+    await navigator.clipboard.writeText(texto);   // funciona no celular (exige https, ok no GitHub Pages)
+  }catch(e){
+    $('ufTexto').select();
+    document.execCommand('copy');                 // fallback pra abrir o arquivo direto do computador
+  }
+  const btn = $('btnCopiarUf');
+  const original = btn.textContent;
+  btn.textContent = 'Copiado!';
+  setTimeout(() => btn.textContent = original, 1200);
+});
+</script>
+</body>
+</html>
