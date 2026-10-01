@@ -141,7 +141,10 @@
       <h2>Cidades da rota (na ordem)</h2>
       <div class="wp-list" id="wpList"></div>
       <div class="note" id="statusCidades" style="margin-top:6px;">Carregando lista de municípios do IBGE...</div>
-      <button class="ghost" id="btnAdd">+ adicionar cidade</button>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button class="ghost" id="btnAdd">+ adicionar cidade</button>
+        <button class="ghost" id="btnNovaRota" title="apaga a rota salva e começa do zero">Nova rota</button>
+      </div>
 
       <div style="margin-top:14px; border-top:1px solid var(--border); padding-top:12px;">
         <div style="font-size:12px; color:var(--muted); margin-bottom:6px;">Estados (opcional)</div>
@@ -792,62 +795,7 @@ $('btnRota').addEventListener('click', async () => {
       $('loadingRota').textContent = 'Calculando rota...';
     }
 
-    waypointsBase = pontos.length === 2 ? pontos.map(p => L.latLng(p.lat, p.lon)) : null;
-    baseAlternativas = null;
-    alternativaAtivaIdx = 0;
-    trocandoAlternativa = false;
-
-    if(routingControl){ map.removeControl(routingControl); routingControl = null; }
-
-    routingControl = L.Routing.control({
-      waypoints: pontos.map(p => L.latLng(p.lat, p.lon)),
-      router: L.Routing.osrmv1({
-        serviceUrl: 'https://router.project-osrm.org/route/v1',
-        urlParameters: { alternatives: true }
-      }),
-      routeWhileDragging: true,
-      addWaypoints: true,
-      draggableWaypoints: true,
-      fitSelectedRoutes: false, // o enquadramento é feito por enquadrarRota(), considerando a janela flutuante
-      show: false,
-      showAlternatives: true,
-      lineOptions: { styles: [{ color: '#0f6e56', weight: 5, opacity: 0.9 }] },
-      altLineOptions: { styles: [{ color: '#8a8a84', weight: 4, opacity: 0.6, dashArray: '6,8' }] },
-      createMarker: function(i, wp){
-        const marker = L.marker(wp.latLng, { draggable: true });
-        const el = document.createElement('div');
-        el.style.fontSize = '13px';
-        el.innerHTML = `Ponto ${i+1}<br><button style="margin-top:6px;padding:5px 10px;font-size:12px;cursor:pointer;border:1px solid #a32d2d;color:#a32d2d;background:#fff;border-radius:6px;">Remover este ponto</button>`;
-        el.querySelector('button').addEventListener('click', () => {
-          const wps = routingControl.getWaypoints();
-          if(wps.length <= 2){
-            alert('Precisa de pelo menos 2 pontos (origem e destino).');
-            return;
-          }
-          const idx = wps.findIndex(w => w.latLng && w.latLng.equals(marker.getLatLng()));
-          if(idx !== -1) routingControl.spliceWaypoints(idx, 1);
-        });
-        marker.bindPopup(el);
-        return marker;
-      }
-    }).addTo(map);
-
-    routingControl.on('routesfound', (e) => atualizarResumo(e.routes[0], e.routes));
-    // no celular, depois de traçar, rola até o mapa (só na primeira rota, não a cada arrasto)
-    // só na primeira rota (não a cada arrasto): no celular entra no modo mapa,
-    // no computador só enquadra a rota
-    routingControl.once('routesfound', () => {
-      setTimeout(() => {
-        if(ehCelular()) entrarModoMapa();
-        else enquadrarRota();
-      }, 60);
-    });
-    routingControl.on('routingerror', (e) => {
-      const msg = (e && e.error && e.error.message) ? e.error.message : 'Não foi possível calcular a rota entre esses pontos.';
-      $('errorRota').textContent = msg;
-      $('errorRota').style.display = 'block';
-      console.error('routing error', e);
-    });
+    desenharRota(pontos.map(p => L.latLng(p.lat, p.lon)));
   }catch(e){
     $('errorRota').textContent = e.message || 'Erro ao calcular a rota.';
     $('errorRota').style.display = 'block';
@@ -855,6 +803,67 @@ $('btnRota').addEventListener('click', async () => {
     $('loadingRota').style.display = 'none';
   }
 });
+
+// cria o controle de rota no mapa a partir de uma lista de L.latLng
+// (usado pelo botão "Traçar rota" e ao restaurar a última rota salva)
+function desenharRota(latlngs){
+  waypointsBase = latlngs.length === 2 ? latlngs.slice() : null;
+  baseAlternativas = null;
+  alternativaAtivaIdx = 0;
+  trocandoAlternativa = false;
+
+  if(routingControl){ map.removeControl(routingControl); routingControl = null; }
+
+  routingControl = L.Routing.control({
+    waypoints: latlngs,
+    router: L.Routing.osrmv1({
+      serviceUrl: 'https://router.project-osrm.org/route/v1',
+      urlParameters: { alternatives: true }
+    }),
+    routeWhileDragging: true,
+    addWaypoints: true,
+    draggableWaypoints: true,
+    fitSelectedRoutes: false, // o enquadramento é feito por enquadrarRota(), considerando a janela flutuante
+    show: false,
+    showAlternatives: true,
+    lineOptions: { styles: [{ color: '#0f6e56', weight: 5, opacity: 0.9 }] },
+    altLineOptions: { styles: [{ color: '#8a8a84', weight: 4, opacity: 0.6, dashArray: '6,8' }] },
+    createMarker: function(i, wp){
+      const marker = L.marker(wp.latLng, { draggable: true });
+      const el = document.createElement('div');
+      el.style.fontSize = '13px';
+      el.innerHTML = `Ponto ${i+1}<br><button style="margin-top:6px;padding:5px 10px;font-size:12px;cursor:pointer;border:1px solid #a32d2d;color:#a32d2d;background:#fff;border-radius:6px;">Remover este ponto</button>`;
+      el.querySelector('button').addEventListener('click', () => {
+        const wps = routingControl.getWaypoints();
+        if(wps.length <= 2){
+          alert('Precisa de pelo menos 2 pontos (origem e destino).');
+          return;
+        }
+        const idx = wps.findIndex(w => w.latLng && w.latLng.equals(marker.getLatLng()));
+        if(idx !== -1) routingControl.spliceWaypoints(idx, 1);
+      });
+      marker.bindPopup(el);
+      return marker;
+    }
+  }).addTo(map);
+
+  routingControl.on('routesfound', (e) => atualizarResumo(e.routes[0], e.routes));
+  routingControl.on('routesfound', salvarRota);   // guarda a rota a cada mudança (inclusive arrastos)
+  // só na primeira rota (não a cada arrasto): no celular entra no modo mapa,
+  // no computador só enquadra a rota
+  routingControl.once('routesfound', () => {
+    setTimeout(() => {
+      if(ehCelular()) entrarModoMapa();
+      else enquadrarRota();
+    }, 60);
+  });
+  routingControl.on('routingerror', (e) => {
+    const msg = (e && e.error && e.error.message) ? e.error.message : 'Não foi possível calcular a rota entre esses pontos.';
+    $('errorRota').textContent = msg;
+    $('errorRota').style.display = 'block';
+    console.error('routing error', e);
+  });
+}
 
 $('btnEstados').addEventListener('click', () => {
   if(!ultimaRotaCoords || !ultimaRotaCoords.length) return;
@@ -1019,6 +1028,81 @@ $('btnEditarRota').addEventListener('click', sairModoMapa);
     }
   });
 })();
+
+// ===== última rota salva no navegador (sobrevive a recarregar, fechar a aba ou o app) =====
+const CHAVE_ROTA = 'roteirizador:ultimaRota:v1';
+
+function salvarRota(){
+  if(!routingControl) return;
+  try{
+    const dados = {
+      cidades: [...wpList.querySelectorAll('input')].map(i => i.value.trim()),
+      // pontos exatos do mapa, incluindo os criados arrastando a linha
+      waypoints: routingControl.getWaypoints().filter(w => w.latLng).map(w => [w.latLng.lat, w.latLng.lng]),
+      passar: [...ufsSelecionadas],
+      evitar: [...ufsEvitadas],
+      eixos: $('eixos').value,
+      estadosAbertos: $('estadosLista').style.display === 'block',
+      salvoEm: Date.now()
+    };
+    localStorage.setItem(CHAVE_ROTA, JSON.stringify(dados));
+  }catch(e){ /* sem armazenamento (ex.: aba anônima): só não salva */ }
+}
+
+function restaurarRota(){
+  let dados = null;
+  try{ dados = JSON.parse(localStorage.getItem(CHAVE_ROTA) || 'null'); }catch(e){ return; }
+  if(!dados || !Array.isArray(dados.waypoints) || dados.waypoints.length < 2) return;
+
+  if(Array.isArray(dados.cidades) && dados.cidades.length >= 2){
+    wpList.innerHTML = ''; wpCount = 0;
+    dados.cidades.forEach(c => addWaypoint(c));
+  }
+  document.querySelectorAll('#chipsUf .chip-uf').forEach(chip => {
+    const uf = chip.textContent;
+    if((dados.passar || []).includes(uf)){ ufsSelecionadas.add(uf); chip.classList.add('ativo'); }
+    else if((dados.evitar || []).includes(uf)){ ufsEvitadas.add(uf); chip.classList.add('evitar'); }
+  });
+  if(dados.eixos && TABELA_A_CARGA_GERAL[dados.eixos]) $('eixos').value = dados.eixos;
+
+  if(dados.salvoEm){
+    const quando = new Date(dados.salvoEm).toLocaleString('pt-BR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
+    $('avisoRota').textContent = `Última rota restaurada (salva em ${quando}).`;
+    $('avisoRota').style.display = 'block';
+  }
+
+  desenharRota(dados.waypoints.map(([lat, lng]) => L.latLng(lat, lng)));
+
+  // se os estados percorridos estavam abertos, reabre (espera os contornos dos estados carregarem)
+  if(dados.estadosAbertos){
+    routingControl.once('routesfound', () => {
+      let tentativas = 0;
+      const abrir = () => {
+        if(estadosGeoJSON) $('btnEstados').click();
+        else if(++tentativas < 40) setTimeout(abrir, 250);
+      };
+      setTimeout(abrir, 100);
+    });
+  }
+}
+
+$('eixos').addEventListener('change', salvarRota);
+$('btnEstados').addEventListener('click', () => setTimeout(salvarRota, 0));
+
+// começar do zero: apaga a rota salva e limpa a tela
+$('btnNovaRota').addEventListener('click', () => {
+  try{ localStorage.removeItem(CHAVE_ROTA); }catch(e){}
+  if(routingControl){ map.removeControl(routingControl); routingControl = null; }
+  wpList.innerHTML = ''; wpCount = 0;
+  addWaypoint(); addWaypoint();
+  ufsSelecionadas.clear(); ufsEvitadas.clear();
+  document.querySelectorAll('#chipsUf .chip-uf').forEach(c => c.classList.remove('ativo', 'evitar'));
+  ['resumoCard', 'avisoRota', 'errorRota', 'estadosLista', 'ufCampo'].forEach(id => { $(id).style.display = 'none'; });
+  ultimaRotaCoords = null; ultimaDistKm = null; waypointsBase = null; baseAlternativas = null;
+  map.setView([-15.78, -47.93], 4);
+});
+
+restaurarRota();
 
 $('btnCopiarUf').addEventListener('click', async () => {
   const texto = $('ufTexto').value;
