@@ -60,6 +60,9 @@
   .note{font-size:12px; color:var(--muted); margin-top:8px; line-height:1.5;}
   .ajuda summary{ cursor:pointer; color:var(--muted); font-size:12px; margin-top:8px; }
 
+  /* elementos da janela flutuante: só aparecem no modo mapa do celular */
+  .sheet-cabecalho, .btn-flutuante{ display:none; }
+
   /* celular: uma coluna, na ordem cidades → mapa → resumo */
   @media (max-width: 799px){
     body{ padding:12px max(12px, env(safe-area-inset-right)) 40px max(12px, env(safe-area-inset-left)); }
@@ -87,6 +90,42 @@
     .leg button.ghost{ padding:8px 12px !important; font-size:13px !important; }
     .stat{ font-size:15px; }
     #pisoAntt{ font-size:18px !important; }
+
+    /* ===== modo mapa: mapa em tela cheia + janela flutuante embaixo (estilo Google Maps) ===== */
+    body.modo-mapa{ overflow:hidden; padding:0; }
+    body.modo-mapa h1,
+    body.modo-mapa .area-cidades{ display:none; }
+    body.modo-mapa #cardMapa{ position:fixed; inset:0; margin:0; padding:0; border:0; border-radius:0; z-index:1; }
+    body.modo-mapa #cardMapa h2{ display:none; }
+    body.modo-mapa #map{ height:100vh; height:100dvh; min-height:0; border:0; border-radius:0; }
+    body.modo-mapa .leaflet-top{ top:calc(56px + env(safe-area-inset-top)); }
+
+    body.modo-mapa .btn-flutuante{
+      display:block; position:absolute; z-index:1100;
+      top:calc(10px + env(safe-area-inset-top)); left:10px;
+      background:#fff; color:var(--text); border:1px solid var(--border); border-radius:22px;
+      padding:10px 16px; font-size:15px; font-weight:600; box-shadow:0 2px 10px rgba(0,0,0,0.18);
+    }
+
+    body.modo-mapa #resumoCard{
+      position:fixed; left:0; right:0; bottom:0; z-index:1200; margin:0;
+      height:88vh; height:88dvh; padding:0; border-radius:16px 16px 0 0; border:0;
+      box-shadow:0 -4px 20px rgba(0,0,0,0.18);
+      display:flex !important; flex-direction:column;
+      transition:transform .28s cubic-bezier(.2,.8,.2,1); will-change:transform;
+    }
+    body.modo-mapa #resumoCard.arrastando{ transition:none; }
+    body.modo-mapa .sheet-cabecalho{
+      display:block; flex-shrink:0; padding:8px 16px 10px; cursor:grab;
+      touch-action:none; user-select:none; border-bottom:1px solid var(--border);
+    }
+    .sheet-alca{ width:40px; height:5px; border-radius:3px; background:#c9c9c3; margin:2px auto 10px; }
+    .sheet-linha{ display:flex; align-items:baseline; gap:6px; font-size:16px; font-weight:600; flex-wrap:wrap; }
+    .sheet-sep{ color:var(--muted); font-weight:400; }
+    .sheet-piso{ margin-left:auto; color:var(--accent); font-size:18px; }
+    .sheet-dica{ font-size:12px; color:var(--muted); margin-top:4px; }
+    body.modo-mapa .sheet-conteudo{ flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; overscroll-behavior:contain; padding:12px 16px calc(24px + env(safe-area-inset-bottom)); }
+    body.modo-mapa .sheet-conteudo > h2{ display:none; }
   }
 </style>
 </head>
@@ -120,10 +159,23 @@
 
     <div class="card area-mapa" id="cardMapa">
       <h2>Mapa</h2>
+      <button type="button" id="btnEditarRota" class="btn-flutuante">← Editar rota</button>
       <div id="map"></div>
     </div>
 
     <div class="card area-resumo" id="resumoCard" style="display:none;">
+      <!-- no celular, este cabeçalho vira a alça da janela flutuante -->
+      <div class="sheet-cabecalho" id="sheetCabecalho">
+        <div class="sheet-alca"></div>
+        <div class="sheet-linha">
+          <span id="sheetKm">-</span>
+          <span class="sheet-sep">·</span>
+          <span id="sheetTempo">-</span>
+          <span class="sheet-piso" id="sheetPiso">-</span>
+        </div>
+        <div class="sheet-dica" id="sheetDica">Puxe pra cima pra ver eixos, estados e rotas</div>
+      </div>
+      <div class="sheet-conteudo" id="sheetConteudo">
       <h2>Resumo</h2>
       <div class="stat"><span class="k">Distância total</span><span class="v" id="distTotal">-</span></div>
       <div class="stat"><span class="k">Tempo (sem paradas)</span><span class="v" id="tempoTotal">-</span></div>
@@ -163,6 +215,7 @@
         </div>
       </div>
       <div class="note so-computador">A distância e o piso atualizam sozinhos quando você ajusta a rota. Os estados recalculam quando você clica no botão.</div>
+      </div><!-- /sheet-conteudo -->
     </div>
 </div>
 
@@ -590,7 +643,11 @@ function calcularPisoAntt(){
   const coef = TABELA_A_CARGA_GERAL[eixos];
   if(!coef){ $('pisoAntt').textContent = '—'; return; }
   const piso = ultimaDistKm * coef.ccd + coef.cc;
-  $('pisoAntt').textContent = piso.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  const pisoTxt = piso.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  $('pisoAntt').textContent = pisoTxt;
+  // cabeçalho da janela flutuante (celular)
+  $('sheetPiso').textContent = pisoTxt;
+  $('sheetDica').textContent = `${eixos} eixos · puxe pra cima pra ver mais`;
 }
 $('eixos').addEventListener('change', calcularPisoAntt);
 
@@ -604,6 +661,8 @@ function atualizarResumo(route, todasRotas){
   const h = Math.floor(horas);
   const m = Math.round((horas - h) * 60);
   $('tempoTotal').textContent = `${h}h ${m}min`;
+  $('sheetKm').textContent = kmTotal.toLocaleString('pt-BR') + ' km';
+  $('sheetTempo').textContent = `${h}h ${m}min`;
   ultimaRotaCoords = route.coordinates; // [{lat, lng}, ...]
   ultimaDistKm = kmTotal;
   $('estadosLista').style.display = 'none';
@@ -747,7 +806,7 @@ $('btnRota').addEventListener('click', async () => {
       routeWhileDragging: true,
       addWaypoints: true,
       draggableWaypoints: true,
-      fitSelectedRoutes: true,
+      fitSelectedRoutes: false, // o enquadramento é feito por enquadrarRota(), considerando a janela flutuante
       show: false,
       showAlternatives: true,
       lineOptions: { styles: [{ color: '#0f6e56', weight: 5, opacity: 0.9 }] },
@@ -773,10 +832,13 @@ $('btnRota').addEventListener('click', async () => {
 
     routingControl.on('routesfound', (e) => atualizarResumo(e.routes[0], e.routes));
     // no celular, depois de traçar, rola até o mapa (só na primeira rota, não a cada arrasto)
+    // só na primeira rota (não a cada arrasto): no celular entra no modo mapa,
+    // no computador só enquadra a rota
     routingControl.once('routesfound', () => {
-      if(window.matchMedia('(max-width: 799px)').matches){
-        $('cardMapa').scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }
+      setTimeout(() => {
+        if(ehCelular()) entrarModoMapa();
+        else enquadrarRota();
+      }, 60);
     });
     routingControl.on('routingerror', (e) => {
       const msg = (e && e.error && e.error.message) ? e.error.message : 'Não foi possível calcular a rota entre esses pontos.';
@@ -835,6 +897,121 @@ $('btnEstados').addEventListener('click', () => {
     $('loadingEstados').style.display = 'none';
   }
 });
+
+// ===== modo mapa (celular): mapa em tela cheia + janela flutuante de 3 alturas =====
+function ehCelular(){ return window.matchMedia('(max-width: 799px)').matches; }
+
+const sheet = { pos: 'peek' };   // 'peek' (só o cabeçalho), 'half' (meia tela), 'full' (quase tela toda)
+
+function alturaPeek(){ return $('sheetCabecalho').getBoundingClientRect().height; }
+
+// deslocamento (translateY) da janela pra cada altura: 0 = totalmente aberta
+function deslocamentoDe(pos){
+  const H = $('resumoCard').getBoundingClientRect().height;
+  if(pos === 'full') return 0;
+  if(pos === 'half') return Math.max(0, H - window.innerHeight * 0.5);
+  return Math.max(0, H - alturaPeek());
+}
+
+function posicionarSheet(pos){
+  sheet.pos = pos;
+  // mostra/esconde a dica ANTES de medir, senão a altura mínima fica errada e corta a dica
+  $('sheetDica').style.display = pos === 'peek' ? 'block' : 'none';
+  $('resumoCard').style.transform = `translateY(${deslocamentoDe(pos)}px)`;
+}
+
+// enquadra a rota inteira, deixando espaço pro botão em cima e pra janela embaixo
+function enquadrarRota(){
+  if(!ultimaRotaCoords || !ultimaRotaCoords.length) return;
+  const limites = L.latLngBounds(ultimaRotaCoords);
+  if(document.body.classList.contains('modo-mapa')){
+    map.fitBounds(limites, { paddingTopLeft: [30, 80], paddingBottomRight: [30, alturaPeek() + 30] });
+  } else {
+    map.fitBounds(limites, { padding: [30, 30] });
+  }
+}
+
+function entrarModoMapa(){
+  document.body.classList.add('modo-mapa');
+  window.scrollTo(0, 0);
+  map.invalidateSize();           // o mapa mudou de tamanho, o Leaflet precisa saber
+  requestAnimationFrame(() => {
+    posicionarSheet('peek');
+    enquadrarRota();
+  });
+}
+
+function sairModoMapa(){
+  document.body.classList.remove('modo-mapa');
+  $('resumoCard').style.transform = '';
+  map.invalidateSize();
+  window.scrollTo(0, 0);
+}
+$('btnEditarRota').addEventListener('click', sairModoMapa);
+
+// arrastar a janela pelo cabeçalho (dedo ou mouse)
+(function(){
+  const cab = $('sheetCabecalho'), card = $('resumoCard');
+  let ativo = false, movido = false, inicioY = 0, inicioDesl = 0, ultY = 0, ultT = 0, vel = 0;
+  const deslAtual = () => {
+    const m = /translateY\(([-\d.]+)px\)/.exec(card.style.transform);
+    return m ? parseFloat(m[1]) : 0;
+  };
+
+  cab.addEventListener('pointerdown', (e) => {
+    if(!document.body.classList.contains('modo-mapa')) return;
+    ativo = true; movido = false;
+    inicioY = ultY = e.clientY; inicioDesl = deslAtual();
+    ultT = performance.now(); vel = 0;
+    card.classList.add('arrastando');
+    try{ cab.setPointerCapture(e.pointerId); }catch(_){}
+  });
+
+  cab.addEventListener('pointermove', (e) => {
+    if(!ativo) return;
+    const dy = e.clientY - inicioY;
+    if(Math.abs(dy) > 5) movido = true;
+    const desl = Math.min(deslocamentoDe('peek'), Math.max(0, inicioDesl + dy));
+    card.style.transform = `translateY(${desl}px)`;
+    const agora = performance.now();
+    vel = (e.clientY - ultY) / Math.max(1, agora - ultT);   // px/ms, positivo = pra baixo
+    ultY = e.clientY; ultT = agora;
+  });
+
+  const soltar = () => {
+    if(!ativo) return;
+    ativo = false;
+    card.classList.remove('arrastando');
+
+    // toque sem arrastar: alterna entre as alturas
+    if(!movido){
+      posicionarSheet(sheet.pos === 'peek' ? 'half' : sheet.pos === 'half' ? 'full' : 'peek');
+      return;
+    }
+
+    const desl = deslAtual();
+    const alvos = ['full', 'half', 'peek'].map(p => ({ p, d: deslocamentoDe(p) }));
+    let alvo;
+    if(vel > 0.5){        // puxão rápido pra baixo: vai pra próxima altura abaixo
+      alvo = alvos.find(a => a.d > desl + 1) || alvos[alvos.length - 1];
+    } else if(vel < -0.5){ // puxão rápido pra cima: vai pra próxima altura acima
+      alvo = [...alvos].reverse().find(a => a.d < desl - 1) || alvos[0];
+    } else {              // soltou devagar: vai pra altura mais próxima
+      alvo = alvos.reduce((a, b) => Math.abs(b.d - desl) < Math.abs(a.d - desl) ? b : a);
+    }
+    posicionarSheet(alvo.p);
+  };
+  cab.addEventListener('pointerup', soltar);
+  cab.addEventListener('pointercancel', soltar);
+
+  // girar o celular ou mudar o tamanho: recalcula a posição
+  window.addEventListener('resize', () => {
+    if(document.body.classList.contains('modo-mapa')){
+      if(!ehCelular()){ sairModoMapa(); return; }
+      posicionarSheet(sheet.pos);
+    }
+  });
+})();
 
 $('btnCopiarUf').addEventListener('click', async () => {
   const texto = $('ufTexto').value;
