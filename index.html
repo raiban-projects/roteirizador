@@ -124,7 +124,9 @@
     .sheet-sep{ color:var(--muted); font-weight:400; }
     .sheet-piso{ margin-left:auto; color:var(--accent); font-size:18px; }
     .sheet-dica{ font-size:12px; color:var(--muted); margin-top:4px; }
-    body.modo-mapa .sheet-conteudo{ flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; overscroll-behavior:contain; padding:12px 16px calc(24px + env(safe-area-inset-bottom)); }
+    body.modo-mapa #resumoCard{ overflow:hidden; }
+    /* min-height:0 é o que deixa um item flex encolher e rolar; sem isso ele cresce com o conteúdo e nunca rola */
+    body.modo-mapa .sheet-conteudo{ flex:1; min-height:0; overflow-y:auto; -webkit-overflow-scrolling:touch; overscroll-behavior:contain; padding:12px 16px calc(24px + env(safe-area-inset-bottom)); }
     body.modo-mapa .sheet-conteudo > h2{ display:none; }
   }
 </style>
@@ -917,7 +919,11 @@ function posicionarSheet(pos){
   sheet.pos = pos;
   // mostra/esconde a dica ANTES de medir, senão a altura mínima fica errada e corta a dica
   $('sheetDica').style.display = pos === 'peek' ? 'block' : 'none';
-  $('resumoCard').style.transform = `translateY(${deslocamentoDe(pos)}px)`;
+  const desl = deslocamentoDe(pos);
+  $('resumoCard').style.transform = `translateY(${desl}px)`;
+  // a parte de baixo da janela fica fora da tela quando ela não está toda aberta;
+  // esse espaço extra deixa rolar até o último item aparecer
+  $('sheetConteudo').style.paddingBottom = `calc(${Math.round(desl) + 24}px + env(safe-area-inset-bottom))`;
 }
 
 // enquadra a rota inteira, deixando espaço pro botão em cima e pra janela embaixo
@@ -944,6 +950,7 @@ function entrarModoMapa(){
 function sairModoMapa(){
   document.body.classList.remove('modo-mapa');
   $('resumoCard').style.transform = '';
+  $('sheetConteudo').style.paddingBottom = '';
   map.invalidateSize();
   window.scrollTo(0, 0);
 }
