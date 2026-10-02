@@ -251,34 +251,45 @@ function addWaypoint(value=''){
   wpList.appendChild(row);
 }
 
-// arrastar pra reordenar, com pointer events: funciona com mouse e com o dedo
+// arrastar pra reordenar, com pointer events: funciona com mouse e com o dedo.
+// Importante: a linha arrastada NUNCA sai do lugar no documento; quem se move são as
+// vizinhas. Tirar e recolocar a linha arrastada faz o navegador soltar o "agarre" do
+// mouse/dedo, e o arraste parava depois da primeira troca.
 function ligarArraste(row){
   const handle = row.querySelector('.handle');
-  let arrastando = false;
   handle.addEventListener('pointerdown', (e) => {
+    if(e.pointerType === 'mouse' && e.button !== 0) return;   // só botão esquerdo
     e.preventDefault();
-    arrastando = true;
     try{ handle.setPointerCapture(e.pointerId); }catch(_){}
     row.classList.add('arrastando');
+    document.body.style.userSelect = 'none';                  // não selecionar texto enquanto arrasta
+
+    const mover = (ev) => {
+      // posição desejada = quantas das outras linhas têm o meio acima do ponteiro
+      const outras = [...wpList.children].filter(r => r !== row);
+      const alvo = outras.filter(r => {
+        const rect = r.getBoundingClientRect();
+        return ev.clientY > rect.top + rect.height / 2;
+      }).length;
+      let atual = [...wpList.children].indexOf(row);
+      // sobe: joga a vizinha de cima pra baixo da linha arrastada
+      while(atual > alvo){ wpList.insertBefore(row.previousElementSibling, row.nextSibling); atual--; }
+      // desce: joga a vizinha de baixo pra cima da linha arrastada
+      while(atual < alvo){ wpList.insertBefore(row.nextElementSibling, row); atual++; }
+    };
+    const soltar = () => {
+      document.removeEventListener('pointermove', mover);
+      document.removeEventListener('pointerup', soltar);
+      document.removeEventListener('pointercancel', soltar);
+      row.classList.remove('arrastando');
+      document.body.style.userSelect = '';
+      renumerar();
+    };
+    // escuta no documento inteiro: o arraste continua mesmo se o ponteiro sair da alça
+    document.addEventListener('pointermove', mover);
+    document.addEventListener('pointerup', soltar);
+    document.addEventListener('pointercancel', soltar);
   });
-  handle.addEventListener('pointermove', (e) => {
-    if(!arrastando) return;
-    const outras = [...wpList.children].filter(r => r !== row);
-    const depoisDe = outras.find(r => {
-      const rect = r.getBoundingClientRect();
-      return e.clientY < rect.top + rect.height / 2;
-    });
-    if(depoisDe){ if(row.nextSibling !== depoisDe) wpList.insertBefore(row, depoisDe); }
-    else if(wpList.lastChild !== row) wpList.appendChild(row);
-  });
-  const soltar = () => {
-    if(!arrastando) return;
-    arrastando = false;
-    row.classList.remove('arrastando');
-    renumerar();
-  };
-  handle.addEventListener('pointerup', soltar);
-  handle.addEventListener('pointercancel', soltar);
 }
 function renumerar(){
   [...wpList.children].forEach((row, i) => { row.querySelector('.tag').textContent = i + 1; });
