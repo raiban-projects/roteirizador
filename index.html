@@ -42,6 +42,9 @@
   .leg{ display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:4px 8px; font-size:13px; padding:5px 0; }
   .leg .muted{ color:var(--muted); }
   .chips{ display:flex; flex-wrap:wrap; gap:4px; }
+  .wp-item[data-auto] input{ padding-right:74px; background:#fafaf8; }
+  .auto-tag{ position:absolute; right:8px; top:50%; transform:translateY(-50%); font-size:11px; font-weight:600;
+             color:var(--accent); background:var(--accent-bg); padding:2px 7px; border-radius:10px; pointer-events:none; }
   .sugestoes div{ padding:8px 10px; font-size:13px; cursor:pointer; }
   .sugestoes div:hover, .sugestoes div.ativa{ background:var(--accent-bg); color:var(--accent); }
   .wp-item .tag{width:22px; height:22px; border-radius:50%; background:var(--accent-bg); color:var(--accent); font-size:11px; font-weight:700; display:flex; align-items:center; justify-content:center; flex-shrink:0;}
@@ -231,20 +234,32 @@ const $ = id => document.getElementById(id);
 let wpCount = 0;
 const wpList = $('wpList');
 
-function addWaypoint(value=''){
+// auto: preenchido quando a cidade foi escolhida pela ferramenta, não digitada por você.
+// Vale a sigla do estado forçado (ex.: 'GO') ou 'desvio' (cidade usada pra evitar um estado).
+// Cidades automáticas são descartadas e recalculadas a cada "Traçar rota".
+function addWaypoint(value='', auto=''){
   wpCount++;
   const row = document.createElement('div');
   row.className = 'wp-item';
+  if(auto) row.dataset.auto = auto;
   row.innerHTML = `<div class="handle" title="arrastar pra reordenar" aria-label="arrastar pra reordenar">⠿</div>
     <div class="tag">${wpCount}</div>
     <div class="campo">
       <input type="text" placeholder="Digite a cidade..." value="${value}" autocomplete="off" autocapitalize="words" enterkeyhint="next">
+      ${auto ? `<span class="auto-tag" title="escolhida automaticamente; some se você tirar a marcação do estado">${auto === 'desvio' ? 'desvio' : 'via ' + auto}</span>` : ''}
       <div class="sugestoes"></div>
     </div>
     <button class="remover" title="remover" aria-label="remover cidade">✕</button>`;
   row.querySelector('button.remover').addEventListener('click', () => {
     row.remove();
     renumerar();
+  });
+  // se você editar o texto, a cidade passa a ser sua: deixa de ser automática
+  row.querySelector('input').addEventListener('input', () => {
+    if(!row.dataset.auto) return;
+    delete row.dataset.auto;
+    const tag = row.querySelector('.auto-tag');
+    if(tag) tag.remove();
   });
   ligarAutocomplete(row.querySelector('input'), row.querySelector('.sugestoes'));
   ligarArraste(row);
@@ -444,7 +459,7 @@ function inserirNaOrdem(pontos, cidade, coordsBase){
   const origem = pontos[0];
   const destino = pontos[pontos.length - 1];
   const meio = pontos.slice(1, -1).map(p => ({ ponto: p, ordem: ordemDe(p.lat, p.lon) }));
-  const novo = { ponto: { lat: cidade.lat, lon: cidade.lon, query: cidade.label }, ordem: ordemDe(cidade.lat, cidade.lon) };
+  const novo = { ponto: { lat: cidade.lat, lon: cidade.lon, query: cidade.label, auto: 'desvio' }, ordem: ordemDe(cidade.lat, cidade.lon) };
   const inter = [...meio, novo].sort((a, b) => a.ordem - b.ordem).map(x => x.ponto);
   return [origem, ...inter, destino];
 }
@@ -737,6 +752,10 @@ function usarRotaAlternativa(idx){
 }
 
 $('btnRota').addEventListener('click', async () => {
+  // descarta as cidades que a ferramenta inseriu na rota anterior (estado forçado ou desvio):
+  // elas são recalculadas agora, a partir dos estados que estão marcados neste momento
+  [...wpList.children].forEach(r => { if(r.dataset.auto) r.remove(); });
+  renumerar();
   const inputs = [...wpList.querySelectorAll('input')].map(i => i.value.trim());
   $('errorRota').style.display = 'none';
   if(inputs.some(v => !v) || inputs.length < 2){
@@ -773,14 +792,14 @@ $('btnRota').addEventListener('click', async () => {
           const origem = pontos[0];
           const destino = pontos[pontos.length - 1];
           const meio = pontos.slice(1, -1).map(p => ({ ponto: p, ordem: ordemDe(p.lat, p.lon) }));
-          const novos = extras.map(e => ({ ponto: { lat: e.cidade.lat, lon: e.cidade.lon, query: e.cidade.label }, ordem: e.ordem }));
+          const novos = extras.map(e => ({ ponto: { lat: e.cidade.lat, lon: e.cidade.lon, query: e.cidade.label, auto: e.cidade.uf }, ordem: e.ordem }));
           const intermediarios = [...meio, ...novos].sort((a, b) => a.ordem - b.ordem).map(x => x.ponto);
           pontos = [origem, ...intermediarios, destino];
 
           // reescreve a lista de cidades na tela, já na ordem final
           wpList.innerHTML = '';
           wpCount = 0;
-          pontos.forEach(p => addWaypoint(p.query));
+          pontos.forEach(p => addWaypoint(p.query, p.auto));
         }
       }
       $('loadingRota').textContent = 'Calculando rota...';
@@ -801,7 +820,7 @@ $('btnRota').addEventListener('click', async () => {
         // cidade de desvio é um município de verdade, então entra na lista
         wpList.innerHTML = '';
         wpCount = 0;
-        pontos.forEach(p => addWaypoint(p.query));
+        pontos.forEach(p => addWaypoint(p.query, p.auto));
       }
       $('loadingRota').textContent = 'Calculando rota...';
     }
@@ -1048,6 +1067,7 @@ function salvarRota(){
   try{
     const dados = {
       cidades: [...wpList.querySelectorAll('input')].map(i => i.value.trim()),
+      cidadesAuto: [...wpList.children].map(r => r.dataset.auto || ''),
       // pontos exatos do mapa, incluindo os criados arrastando a linha
       waypoints: routingControl.getWaypoints().filter(w => w.latLng).map(w => [w.latLng.lat, w.latLng.lng]),
       passar: [...ufsSelecionadas],
@@ -1067,7 +1087,7 @@ function restaurarRota(){
 
   if(Array.isArray(dados.cidades) && dados.cidades.length >= 2){
     wpList.innerHTML = ''; wpCount = 0;
-    dados.cidades.forEach(c => addWaypoint(c));
+    dados.cidades.forEach((c, i) => addWaypoint(c, (dados.cidadesAuto || [])[i] || ''));
   }
   document.querySelectorAll('#chipsUf .chip-uf').forEach(chip => {
     const uf = chip.textContent;
